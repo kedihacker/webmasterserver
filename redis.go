@@ -83,11 +83,12 @@ func main() {
 		kv   map[string]chan (redis.Message)
 		lock sync.RWMutex
 	}{}
-	// rdb := redis.NewClient(&redis.Options{
-	// 	Addr:     "127.0.0.1:6379",
-	// 	Password: "", // no password set
-	// 	DB:       0,  // use default DB
-	// })
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "127.0.0.1:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
 	upy := websocket.Upgrader{
 		WriteBufferPool: &sync.Pool{},
 	}
