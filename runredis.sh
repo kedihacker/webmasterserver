@@ -1,0 +1,1 @@
+docker run --rm --name our -p 127.18.0.1:6379:6379/tcp  myredis 

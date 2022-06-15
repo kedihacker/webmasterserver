@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/mailru/easygo/netpoll"
@@ -21,20 +20,23 @@ type Notifier[T any] interface {
 	DeleteNotifier()
 }
 
+var incws = make(chan (*websocket.Conn), 128)
+
 func main() {
 	router := mux.NewRouter()
 	upy := websocket.Upgrader{
 		WriteBufferPool: &sync.Pool{},
 	}
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     "127.0.0.1:6379",
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
-	epool, err := netpoll.New(&netpoll.Config{})
-	if err != nil {
-		panic(err)
-	}
+	// rdb := redis.NewClient(&redis.Options{
+	// 	Addr:     "127.18.0.1:6379",
+	// 	Password: "", // no password set
+	// 	DB:       0,  // use default DB
+	// })
+
+	// epool, err := netpoll.New(&netpoll.Config{})
+	// if err != nil {
+	// 	panic(err)
+	// }
 	log.Println("epool:")
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		wsconn, err := upy.Upgrade(w, r, nil)
@@ -43,20 +45,21 @@ func main() {
 			wsconn.Close()
 			return
 		}
+		incws <- wsconn
+		// rawconn, err := netpoll.Handle(wsconn.UnderlyingConn(), netpoll.EventRead|netpoll.EventOneShot)
+		// if err != nil {
+		// 	rawconn.Close()
+		// 	wsconn.Close()
+		// 	log.Println(err)
+		// 	return
+		// }
+		// epool.Start(rawconn, func(e netpoll.Event) {
 
-		rawconn, err := netpoll.Handle(wsconn.UnderlyingConn(), netpoll.EventRead|netpoll.EventOneShot)
-		if err != nil {
-			rawconn.Close()
-			wsconn.Close()
-			log.Println(err)
-			return
-		}
-		epool.Start(rawconn, func(e netpoll.Event) {
-
-			go handleit(wsconn, epool, rawconn)
-		})
+		// 	go handleit(wsconn, epool, rawconn)
+		// })
 
 	})
+
 	//serve touter
 	http.ListenAndServe(":8080", router)
 }
