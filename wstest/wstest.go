@@ -9,7 +9,7 @@ import (
 func main() {
 	connlist := make([]*websocket.Conn, 0)
 	mydialer := websocket.Dialer{}
-	for x := 0; x < 50000; x++ {
+	for x := 0; x < 10000; x++ {
 		log.Print("con num ", x)
 		conn, _, err := mydialer.Dial("ws://localhost:8080/", nil)
 		if err != nil {

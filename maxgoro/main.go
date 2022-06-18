@@ -4,11 +4,10 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
-	"github.com/mailru/easygo/netpoll"
+	"github.com/kedihacker/webmasterserver/maxgoro/wspoolmember"
 )
 
 type Notifier[T any] interface {
@@ -20,7 +19,7 @@ type Notifier[T any] interface {
 	DeleteNotifier()
 }
 
-var incws = make(chan (*websocket.Conn), 128)
+var incws = make(chan (*websocket.Conn), 512)
 
 func main() {
 	router := mux.NewRouter()
@@ -37,6 +36,10 @@ func main() {
 	// if err != nil {
 	// 	panic(err)
 	// }
+
+	for x := 0; x < 256; x++ {
+		wspoolmember.New(64, incws)
+	}
 	log.Println("epool:")
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		wsconn, err := upy.Upgrade(w, r, nil)
@@ -64,29 +67,29 @@ func main() {
 	http.ListenAndServe(":8080", router)
 }
 
-func handleit(wsconn *websocket.Conn, epool netpoll.Poller, rawconn *netpoll.Desc) {
+// func handleit(wsconn *websocket.Conn, epool netpoll.Poller, rawconn *netpoll.Desc) {
 
-	msgtype, msg, err := wsconn.ReadMessage()
-	if err != nil {
-		log.Println(err)
+// 	msgtype, msg, err := wsconn.ReadMessage()
+// 	if err != nil {
+// 		log.Println(err)
 
-		epool.Stop(rawconn)
-		rawconn.Close()
-		wsconn.Close()
-		return
-	}
-	time.Sleep(time.Millisecond)
-	log.Println("msgtype:", msgtype, "msg:", string(msg))
-	wsconn.WriteMessage(msgtype, msg)
-	rawconn, err = netpoll.Handle(wsconn.UnderlyingConn(), netpoll.EventRead|netpoll.EventOneShot)
-	if err != nil {
-		log.Println(err)
-		epool.Stop(rawconn)
-		rawconn.Close()
-		wsconn.Close()
-		return
-	}
-	epool.Start(rawconn, func(e netpoll.Event) {
-		go handleit(wsconn, epool, rawconn)
-	})
-}
+// 		epool.Stop(rawconn)
+// 		rawconn.Close()
+// 		wsconn.Close()
+// 		return
+// 	}
+// 	time.Sleep(time.Millisecond)
+// 	log.Println("msgtype:", msgtype, "msg:", string(msg))
+// 	wsconn.WriteMessage(msgtype, msg)
+// 	rawconn, err = netpoll.Handle(wsconn.UnderlyingConn(), netpoll.EventRead|netpoll.EventOneShot)
+// 	if err != nil {
+// 		log.Println(err)
+// 		epool.Stop(rawconn)
+// 		rawconn.Close()
+// 		wsconn.Close()
+// 		return
+// 	}
+// 	epool.Start(rawconn, func(e netpoll.Event) {
+// 		go handleit(wsconn, epool, rawconn)
+// 	})
+// }

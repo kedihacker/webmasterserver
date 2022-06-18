@@ -2,6 +2,8 @@ package wspoolmember
 
 import (
 	"log"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -11,122 +13,138 @@ import (
 )
 
 type Wsmember struct {
-	wsconnbuf *collection.Queue[*timewsconn]
-	rcchan    chan (websocket.Conn)
-	commchan  chan (comm.Commstr)
-	Accws     bool
-	epool     netpoll.Poller
+	wsconnbuf     *collection.Queue[*timewsconn]
+	wsconnbufsize int
+	// for reciving ws when its ready no guraantes about being consumed
+	rcchan   chan (*websocket.Conn)
+	commchan chan (*comm.Commstr)
+	//are we accepting new connections?
+	Accws        bool
+	epool        *netpoll.Poller
+	noconcurrent sync.Mutex
+
+	//for general garbage colection
+	timey <-chan (time.Time)
 }
 
 type timewsconn struct {
 	wsconn     *websocket.Conn
 	starttime  time.Time
-	handledesc []*netpoll.Desc
+	handledesc *netpoll.Desc
 }
 
-func New(size int, rcchan chan (websocket.Conn)) *Wsmember {
+func New(size int, rcchan chan (*websocket.Conn)) *Wsmember {
 	rb := collection.NewQueue[*timewsconn]()
 
 	tortn := Wsmember{
-		wsconnbuf: rb,
-		rcchan:    rcchan,
-		commchan:  make(chan comm.Commstr, 128),
-		Accws:     false,
+		wsconnbuf:     rb,
+		wsconnbufsize: size,
+		rcchan:        rcchan,
+		commchan:      make(chan *comm.Commstr, 128),
+		Accws:         true,
+		noconcurrent:  sync.Mutex{},
 	}
 	go mainloop(&tortn)
 	return &tortn
 }
 
 func mainloop(wsm *Wsmember) {
+	succes := wsm.noconcurrent.TryLock()
+	if !succes {
+		log.Println("mainloop: already running")
+		return
+	}
 	tmepepool, err := netpoll.New(&netpoll.Config{})
-	wsm.epool = tmepepool
+	wsm.epool = &tmepepool
 	if err != nil {
 		log.Panic(err)
 	}
+	wsm.timey = time.Tick(time.Millisecond)
 	for {
-		msg, ok := <-wsm.commchan
-		if ok {
+		select {
+		case msg := <-wsm.commchan:
+			log.Print("mainloop: got message", msg.Commmsg, " ", len(wsm.rcchan))
 			switch msg.Commmsg {
 			case comm.Drain:
 				wsm.Accws = false
-			case comm.Newws:
-				wsstr := msg.Value.(comm.Newwstr).Wsconn
-				if wsm.Accws {
-					if wsm.wsconnbuf.IsEmpty() {
-						bufedd := &timewsconn{
-							wsconn:     wsstr,
-							starttime:  time.Now(),
-							handledesc: []*netpoll.Desc{},
-						}
-						wsm.wsconnbuf.Add(bufedd)
-
-						rawdesc, err := netpoll.Handle(wsstr.UnderlyingConn(), netpoll.EventRead)
-
-						if err != nil {
-							log.Print(err)
-							wsstr.Close()
-						}
-						bufedd.handledesc = append(bufedd.handledesc, rawdesc)
-						wsm.epool.Start(rawdesc, func(e netpoll.Event) {
-							wsm.commchan <- comm.Commstr{
-								Commmsg: comm.Newframe,
-								Value:   bufedd,
-							}
-						})
-					} else {
-						checkemptyspace(wsm)
-						bufedd := &timewsconn{
-							wsconn:     wsstr,
-							starttime:  time.Now(),
-							handledesc: []*netpoll.Desc{},
-						}
-						wsm.wsconnbuf.Add(bufedd)
-
-						rawdesc, err := netpoll.Handle(wsstr.UnderlyingConn(), netpoll.EventRead|netpoll.EventOneShot)
-
-						if err != nil {
-							log.Print(err)
-							wsstr.Close()
-						}
-						bufedd.handledesc = append(bufedd.handledesc, rawdesc)
-						wsm.epool.Start(rawdesc, func(e netpoll.Event) {
-							wsm.epool.Resume(rawdesc)
-							wsm.commchan <- comm.Commstr{
-								Commmsg: comm.Newframe,
-								Value:   bufedd,
-							}
-						})
-					}
-				} else {
-					log.Print("sent a wsconn to draining wspoolmember")
-					msg.Value.(comm.Newwstr).Wsconn.Close()
-				}
-			case comm.Newframe:
+			case comm.Newframe: // ping pong for now
 				wsconn := msg.Value.(*timewsconn)
 				contenttype, content, err := wsconn.wsconn.ReadMessage()
 				if err != nil {
+					log.Print("cont read")
 					wsconn.wsconn.Close()
-					for _, x := range wsconn.handledesc {
-						wsm.epool.Stop(x)
-					}
-
+					(*(wsm.epool)).Stop(wsconn.handledesc)
 				}
-				wsconn.wsconn.WriteMessage(contenttype, content)
-			}
-		} else {
-			checkemptyspace(wsm)
-		}
+				time.Sleep(time.Millisecond)
+				err = wsconn.wsconn.WriteMessage(contenttype, content)
+				if err != nil {
+					log.Println("write error", err)
+				}
+				err = (*(wsm.epool)).Resume(wsconn.handledesc)
 
+				if err != nil {
+					log.Println("resume error", err)
+				}
+			}
+		case <-wsm.timey:
+			checkemptyspace(wsm)
+			switch {
+			case wsm.wsconnbuf.Length() < uint(wsm.wsconnbufsize):
+				// fmt.Print("mainloop: accepting new websocket")
+				runtime.Gosched()
+				select {
+				case msg := <-wsm.rcchan:
+					newwebssocketfwiend(wsm, msg)
+				default:
+				}
+			default:
+			}
+
+			// log.Println("mainloop: default")
+
+		}
 	}
+}
+
+// gets called when a new websocket is ready to be accepted
+// it does labels with current time and add it to epool
+func newwebssocketfwiend(wsm *Wsmember, wsconn *websocket.Conn) {
+	bufedd := &timewsconn{
+		wsconn:     wsconn,
+		starttime:  time.Now(),
+		handledesc: &netpoll.Desc{},
+	}
+	wsm.wsconnbuf.Add(bufedd)
+
+	rawdesc, err := netpoll.Handle(bufedd.wsconn.UnderlyingConn(), netpoll.EventRead|netpoll.EventOneShot)
+
+	if err != nil {
+		log.Print(err)
+		wsconn.Close()
+	}
+	bufedd.handledesc = rawdesc
+	err = (*(wsm.epool)).Start(rawdesc, func(e netpoll.Event) {
+		log.Print("new frame")
+		wsm.commchan <- &comm.Commstr{
+			Commmsg: comm.Newframe,
+			Value:   bufedd,
+		}
+	})
+	if err != nil {
+		log.Print(err)
+		wsconn.Close()
+	}
+
 }
 
 func checkemptyspace(wsm *Wsmember) {
 	latest, found := wsm.wsconnbuf.Peek()
 	if found {
 		if time.Since(latest.starttime).Seconds() > 60 {
-			for _, x := range latest.handledesc {
-				wsm.epool.Stop(x)
-			}
+			log.Println("closing old websocket")
+
+			(*(wsm.epool)).Stop(latest.handledesc)
+			wsm.wsconnbuf.Next()
 			latest.wsconn.Close()
 			checkemptyspace(wsm)
 		}
@@ -135,7 +153,7 @@ func checkemptyspace(wsm *Wsmember) {
 }
 
 func (wsm *Wsmember) Drain(callchan chan (struct{})) {
-	wsm.commchan <- comm.Commstr{
+	wsm.commchan <- &comm.Commstr{
 		Commmsg: comm.Drain,
 		Value:   nil,
 	}

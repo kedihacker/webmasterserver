@@ -9,12 +9,14 @@ type Commstr struct {
 }
 
 const (
-	Drain    Commmsg = iota
-	Newws    Commmsg = iota
+	Drain Commmsg = iota
+	Newws Commmsg = iota
+	// there is new data on the websocket
 	Newframe Commmsg = iota
 )
 
 // Contains websocketconn for parsing
 type Newwstr struct {
-	Wsconn *websocket.Conn
+	Wsconn     *websocket.Conn
+	Returnchan chan (*websocket.Conn)
 }
