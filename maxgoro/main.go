@@ -7,7 +7,9 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/kedihacker/webmasterserver/maxgoro/msgrouter"
 	"github.com/kedihacker/webmasterserver/maxgoro/wspoolmember"
+	"github.com/kedihacker/webmasterserver/maxgoro/wspoolmember/comm"
 )
 
 type Notifier[T any] interface {
@@ -19,7 +21,7 @@ type Notifier[T any] interface {
 	DeleteNotifier()
 }
 
-var incws = make(chan (*websocket.Conn), 512)
+var incws = make(chan (comm.Newfwiendmetadata), 512)
 
 func main() {
 	router := mux.NewRouter()
@@ -36,19 +38,23 @@ func main() {
 	// if err != nil {
 	// 	panic(err)
 	// }
-
-	for x := 0; x < 256; x++ {
-		wspoolmember.New(64, incws)
+	pubsubpool := msgrouter.New[comm.Unipubsubmsg]()
+	for x := 0; x < 512; x++ {
+		wspoolmember.New(512, incws, pubsubpool, 60)
 	}
 	log.Println("epool:")
-	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/{listenker:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$}", func(w http.ResponseWriter, r *http.Request) {
+		kv := mux.Vars(r)
 		wsconn, err := upy.Upgrade(w, r, nil)
 		if err != nil {
 			log.Println(err)
 			wsconn.Close()
 			return
 		}
-		incws <- wsconn
+		incws <- comm.Newfwiendmetadata{
+			Conn: wsconn,
+			Kv:   kv,
+		}
 		// rawconn, err := netpoll.Handle(wsconn.UnderlyingConn(), netpoll.EventRead|netpoll.EventOneShot)
 		// if err != nil {
 		// 	rawconn.Close()
@@ -63,8 +69,11 @@ func main() {
 
 	})
 
-	//serve touter
-	http.ListenAndServe(":8080", router)
+	//serve router
+	err := http.ListenAndServe(":8080", router)
+	if err != nil {
+		log.Panic(err)
+	}
 }
 
 // func handleit(wsconn *websocket.Conn, epool netpoll.Poller, rawconn *netpoll.Desc) {
