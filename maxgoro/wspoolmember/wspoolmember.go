@@ -29,8 +29,9 @@ type Wsmember struct {
 	// for getting mesages from pubsub
 	punsubinc chan (comm.Unipubsubmsg)
 	//for general garbage colection
-	timey <-chan (time.Time)
-	wsmap map[string]*Timewsconn
+	timey         <-chan (time.Time)
+	wsmap         map[string]*Timewsconn
+	casulydeleted map[string]struct{}
 }
 
 type Timewsconn struct {
@@ -55,6 +56,7 @@ func New(size int, rcchan chan (comm.Newfwiendmetadata), pubsubpool *msgrouter.M
 		punsubinc:      make(chan (comm.Unipubsubmsg), 128),
 		pubsunpool:     pubsubpool,
 		wsmap:          make(map[string]*Timewsconn),
+		casulydeleted:  make(map[string]struct{}),
 	}
 	go mainloop(&tortn)
 	return &tortn
@@ -77,13 +79,14 @@ func mainloop(wsm *Wsmember) {
 	for {
 		select {
 		case msg := <-wsm.commchan:
-			log.Print("mainloop: got message", msg.Commmsg, " ", len(wsm.rcchan))
+			// log.Println(len(wsm.commchan))
+			// log.Print("mainloop: got message", msg.Commmsg, " ", len(wsm.rcchan))
 			switch msg.Commmsg {
 			case comm.Drain:
 				wsm.Accws = false
 			case comm.Newframe:
 				wsconn := msg.Value.(*Timewsconn)
-				log.Println("event type :", ((wsconn.e & (netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup)) != 0))
+				// log.Println("event type :", ((wsconn.e & (netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup)) != 0))
 				// log.Println("event type :", wsconn.e)
 				if (wsconn.e & (netpoll.EventHup | netpoll.EventReadHup | netpoll.EventWriteHup)) != 0 {
 					log.Println("mainloop: websocket closed")
@@ -104,7 +107,7 @@ func mainloop(wsm *Wsmember) {
 					(*(wsm.epool)).Stop(wsconn.handledesc)
 					continue
 				}
-				log.Print("mainloop: sent message", rcvmsg)
+				// log.Print("mainloop: sent message", rcvmsg)
 				wsm.pubsunpool.Pub(rcvmsg.Keyy, rcvmsg)
 				err = (*(wsm.epool)).Resume(wsconn.handledesc)
 				if err != nil {
@@ -117,8 +120,13 @@ func mainloop(wsm *Wsmember) {
 				}
 			}
 		case msg := <-wsm.punsubinc:
-			log.Print("mainloop: got message ", msg.Keyy, " ", len(wsm.rcchan))
-
+			// log.Print("mainloop: got message ", msg.Keyy, " ", len(wsm.rcchan))
+			if _, found := wsm.casulydeleted[msg.Keyy]; wsm.wsmap[msg.Keyy] == nil && found {
+				continue
+			}
+			if wsm.wsmap[msg.Keyy].wsconn == nil {
+				log.Panic("nowsconn")
+			}
 			err := wsm.wsmap[msg.Keyy].wsconn.WriteJSON(msg)
 			if err != nil {
 				log.Println("error writing to websocket", err)
@@ -170,7 +178,7 @@ func newwebssocketfwiend(wsm *Wsmember, wsconn comm.Newfwiendmetadata) {
 	}
 	bufedd.handledesc = rawdesc
 	err = (*(wsm.epool)).Start(rawdesc, func(e netpoll.Event) {
-		log.Print("new frame")
+		// log.Print("new frame")
 		bufedd.e = e
 		wsm.commchan <- &comm.Commstr{
 			Commmsg: comm.Newframe,
@@ -197,6 +205,7 @@ func checkemptyspace(wsm *Wsmember) {
 			latest.wsconn.Close()
 			wsm.pubsunpool.Unsub(latest.id, wsm.punsubinc)
 			delete(wsm.wsmap, latest.id)
+			wsm.casulydeleted[latest.id] = struct{}{}
 			checkemptyspace(wsm)
 		}
 

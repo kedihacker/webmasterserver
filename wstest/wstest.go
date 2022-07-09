@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"math/rand"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -23,41 +25,47 @@ type Unipubsubmsg struct {
 func main() {
 	log.Println("start")
 
+	starttime := time.Now()
+
 	totalpairs := int64(0)
 	wg := sync.WaitGroup{}
-	for x := 0; x < 200; x++ {
+	for x := 0; x < 1; x++ {
 		wg.Add(1)
 		go mamaloop(&wg, &totalpairs)
 	}
 	wg.Wait()
 	log.Println("ended")
 	log.Println("total pairs: ", totalpairs)
+	log.Println(time.Since(starttime))
 
 }
 
 func pairtest(a, b *aaaa, msg Unipubsubmsg) error {
+	log.Println("pairtest")
 	err := a.Ws.WriteJSON(msg)
 	if err != nil {
 		return err
 	}
 	// icmmsg := Unipubsubmsg{}
-
+	b.Ws.SetReadDeadline(time.Now().Add(time.Millisecond * 10))
 	_, _, err = b.Ws.ReadMessage()
 	if err != nil {
-		return err
+		return errors.New(err.Error() + " " + b.Id + " " + a.Id)
 	}
+
 	return nil
 }
 
 func mamaloop(wg *sync.WaitGroup, totalpairs *int64) {
 	localparis := 0
 	connlist := make([]*aaaa, 0)
-	mydialer := websocket.Dialer{}
-	for x := 0; x < 100; x++ {
-		// log.Print("con num ", x)
+
+	for x := 0; x < 16; x++ {
+		log.Print("con num ", x)
 		randuuid, _ := uuid.NewRandom()
-		conn, _, err := mydialer.Dial("ws://localhost:8080/"+randuuid.String(), nil)
-		if err != nil {
+		conn, httpres, err := websocket.DefaultDialer.Dial("wss://yenicericopybackend.herokuapp.com/ "+randuuid.String(), nil)
+
+		if err != nil && conn != nil && httpres.StatusCode != 101 {
 			log.Fatal(err)
 			return
 		}
@@ -66,9 +74,10 @@ func mamaloop(wg *sync.WaitGroup, totalpairs *int64) {
 			Id: randuuid.String(),
 		})
 	}
+	time.Sleep(time.Second * 10)
 	log.Println("done")
 	// time.Sleep(time.Second * 3)
-	for x := 0; x < 100; x++ {
+	for x := 0; x < 64; x++ {
 		firstcandidateindex := rand.Intn(len(connlist))
 		first := connlist[firstcandidateindex]
 		secondcandidate := rand.Intn(len(connlist) - 1)
@@ -88,6 +97,7 @@ func mamaloop(wg *sync.WaitGroup, totalpairs *int64) {
 		})
 		if err != nil {
 			log.Println(err)
+			localparis--
 		}
 		localparis += 1
 	}

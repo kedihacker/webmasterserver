@@ -39,8 +39,8 @@ func main() {
 	// 	panic(err)
 	// }
 	pubsubpool := msgrouter.New[comm.Unipubsubmsg]()
-	for x := 0; x < 512; x++ {
-		wspoolmember.New(512, incws, pubsubpool, 60)
+	for x := 0; x < 64; x++ {
+		wspoolmember.New(1024*1024, incws, pubsubpool, 60)
 	}
 	log.Println("epool:")
 	router.HandleFunc("/{listenker:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$}", func(w http.ResponseWriter, r *http.Request) {

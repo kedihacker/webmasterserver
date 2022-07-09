@@ -3,14 +3,13 @@ package main
 import "fmt"
 
 func main() {
-	chanlist := make([]chan interface{}, 10)
-	for _, x := range chanlist {
+	anon := make(map[string]struct{})
+	anon["an"] = struct{}{}
 
-		if x == chanlist[0] {
-			fmt.Println("true")
-		} else {
-			fmt.Println("false")
-		}
+	if _, ok := anon["an"]; ok {
+		fmt.Println("found")
 	}
-
+	if anon["ban"] == struct{}{} {
+		fmt.Println("second ")
+	}
 }

@@ -1,6 +1,9 @@
 package msgrouter
 
-import "sync"
+import (
+	"log"
+	"sync"
+)
 
 type Msgrouter[T any] struct {
 	lock     sync.RWMutex
@@ -37,6 +40,10 @@ func (m *Msgrouter[T]) Pub(key string, msg T) {
 	m.lock.RLock()
 	defer m.lock.RUnlock()
 	if reviverchanlist, ok := m.revivers[key]; ok {
+		if len((reviverchanlist)) == 0 {
+			log.Println("no revivers for", key)
+		}
+
 		for _, reviverchan := range reviverchanlist {
 
 			reviverchan <- msg
